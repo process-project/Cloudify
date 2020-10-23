@@ -1,0 +1,110 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.3/types.yaml
+  - plugin:cloudify-openstack-plugin
+  - plugin:cloudify-utilities-plugin
+
+inputs:
+
+  master:
+    description: >
+      The k8s master IP:PORT
+    default: "145.100.130.145:6443"
+
+  token:
+    description: >
+      The token for connecting to master
+    default: "uncg06.yy4i56d43z6mtycq"
+
+  discovery_ca:
+    description: >
+      The discovery token CA cert
+    default: "sha256:5687aa7614e36ac4a088878349865a63cf0382148418cbcfc0d1f37cd6c4035b"
+
+  agent_key_private:
+    description: >
+      The content of the agent's private key.
+    default: { get_secret: agent_key_private }
+
+  agent_key_public:
+    description: >
+      The content of the agent's public key.
+    default: { get_secret: agent_key_public }
+
+  agent_user:
+    description: >
+      The username of the agent running on the instance created from the image.
+    default: ubuntu
+
+  image:
+    description: >
+      An Openstack Image ID. Tested with a Ubuntu 16.04 image.
+    type: string
+    default: "28e054b6-19f9-4eb2-b10a-e33b6807c5a2"
+
+  flavor:
+    description: >
+      An Openstack Flavor ID.
+    default: '2'
+
+dsl_definitions:
+
+  openstack_config: &openstack_config
+    username: openstack_user
+    password: very_insecure_password
+    tenant_name: openstack_tenant
+    auth_url: https://keystone_endpoint
+    region: RegionOne
+
+node_templates:
+
+  k8s_node:
+    type: cloudify.nodes.SoftwareComponent
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: host
+    interfaces:
+      cloudify.interfaces.lifecycle:
+
+        configure: scripts/configure.sh
+
+        start: 
+          implementation: scripts/start.sh
+          inputs:
+            master: { get_input: master }
+            token: { get_input: token }
+            discovery_ca: { get_input: discovery_ca }
+
+        stop: scripts/stop.sh
+      job.execution:
+        exec: 
+          implementation: script.script_runner.tasks.run
+          inputs:
+            script_path: scripts/exec.sh
+            args: ["test10", "test20"]
+
+  host:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      openstack_config: *openstack_config
+      agent_config:
+        user: { get_input: agent_user }
+        install_method: init_script
+        port: 22
+        key: { get_input: agent_key_private }
+      server:
+        meta:
+          blueprint_version: v1
+        key_name: cloudify
+        security_groups: ["kubernetes-2", "default"]
+        image: { get_input: image }
+        flavor: { get_input: flavor }
+
+outputs:
+
+  endpoint:
+    description: Compute server IP
+    value:
+      concat:
+      - { get_attribute: [host, ip] }

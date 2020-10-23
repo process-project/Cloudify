@@ -1,0 +1,90 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.3/types.yaml
+  - plugin:cloudify-openstack-plugin
+  - plugin:cloudify-utilities-plugin
+
+inputs:
+
+  jupyter_port:
+    description: Jupyter server port
+    default: 8080
+
+  agent_key_private:
+    description: >
+      The content of the agent's private key.
+    default: { get_secret: agent_key_private }
+
+  agent_key_public:
+    description: >
+      The content of the agent's public key.
+    default: { get_secret: agent_key_public }
+
+  agent_user:
+    description: >
+      The username of the agent running on the instance created from the image.
+    default: ubuntu
+
+  image:
+    description: >
+      An Openstack Image ID. Tested with a Ubuntu 16.04 image.
+    type: string
+    default: "28e054b6-19f9-4eb2-b10a-e33b6807c5a2"
+
+  flavor:
+    description: >
+      An Openstack Flavor ID.
+    default: '2'
+
+dsl_definitions:
+
+  openstack_config: &openstack_config
+    username: openstack_user
+    password: very_insecure_password
+    tenant_name: openstack_tenant
+    auth_url: https://keystone_endpoint
+    region: RegionOne
+
+node_templates:
+
+  jupyter_server:
+    type: cloudify.nodes.WebServer
+    properties:
+      port: { get_input: jupyter_port }
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: host
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        configure: scripts/configure.sh
+        start: scripts/start.sh
+        stop: scripts/stop.sh
+
+  host:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      openstack_config: *openstack_config
+      agent_config:
+        user: { get_input: agent_user }
+        install_method: init_script
+        port: 22
+        key: { get_input: agent_key_private }
+      server:
+        meta:
+          blueprint_version: v1
+        key_name: cloudify
+        image: { get_input: image }
+        flavor: { get_input: flavor }
+
+outputs:
+
+  endpoint:
+    description: Web application endpoint
+    value:
+      concat:
+      - 'http://'
+      - { get_attribute: [host, ip] }
+      - ':'
+      - { get_input: jupyter_port }
+      - '/'
